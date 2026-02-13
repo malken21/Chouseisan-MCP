@@ -6,7 +6,7 @@ authors = [
     { name = "Marumasa" }
 ]
 dependencies = [
-    "mcp[fastmcp]",
+    "mcp",
     "requests",
     "beautifulsoup4",
     "lxml",
