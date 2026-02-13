@@ -1,7 +1,7 @@
 [project]
 name = "chouseisan-mcp"
 version = "0.1.0"
-description = "調整さん のイベント作成、管理を行う MCP サーバー"
+description = "調整さん のイベント作成 管理を行う MCP サーバー"
 authors = [
     { name = "Marumasa" }
 ]
