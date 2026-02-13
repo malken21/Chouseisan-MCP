@@ -1,0 +1,18 @@
+[project]
+name = "chouseisan-mcp"
+version = "0.1.0"
+description = "調整さん のイベント作成、管理を行う MCP サーバー"
+authors = [
+    { name = "Marumasa" }
+]
+dependencies = [
+    "mcp[fastmcp]",
+    "requests",
+    "beautifulsoup4",
+    "lxml",
+]
+requires-python = ">=3.10"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
