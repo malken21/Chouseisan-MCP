@@ -24,7 +24,7 @@ Claude Desktop などの MCP クライアントの設定に以下を追加して
   "mcpServers": {
     "chouseisan": {
       "command": "python",
-      "args": ["[リポジトリのパス]/mcp_server.py"]
+      "args": ["[リポジトリのパス]/src/main.py"]
     }
   }
 }
