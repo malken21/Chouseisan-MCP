@@ -1,11 +1,16 @@
 from mcp.server.fastmcp import FastMCP
 import logging
+import json
 from chouseisan.client import ChouseisanClient, ChouseisanError
 
 # ロギングの設定
+# タイムスタンプ、ロガー名、ログレベル、メッセージを含むフォーマットを設定
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler() # 標準出力に出力
+    ]
 )
 logger = logging.getLogger("mcp-chouseisan")
 
@@ -14,7 +19,7 @@ mcp = FastMCP("Chouseisan")
 client = ChouseisanClient()
 
 @mcp.tool()
-def create_event(title: str, memo: str = "", dates: str = "") -> str:
+async def create_event(title: str, memo: str = "", dates: str = "") -> str:
     """
     調整さんのイベントを新規作成します。
     
@@ -28,7 +33,7 @@ def create_event(title: str, memo: str = "", dates: str = "") -> str:
     """
     logger.info(f"Tool create_event called: {title}")
     try:
-        url = client.create_event(title, memo, dates)
+        url = await client.create_event(title, memo, dates)
         return f"イベントを作成しました: {url}"
     except ChouseisanError as e:
         logger.error(f"Chouseisan error in create_event: {e}")
@@ -38,7 +43,7 @@ def create_event(title: str, memo: str = "", dates: str = "") -> str:
         return f"エラー: 予期せぬエラーが発生しました。{str(e)}"
 
 @mcp.tool()
-def get_event_info(url: str) -> str:
+async def get_event_info(url: str) -> str:
     """
     調整さんのイベント情報（タイトル、候補日程）を取得します。
     
@@ -50,18 +55,19 @@ def get_event_info(url: str) -> str:
     """
     logger.info(f"Tool get_event_info called for: {url}")
     try:
-        info = client.get_event_info(url)
+        info = await client.get_event_info(url)
         dates_str = "\n".join(info.get("dates", []))
         return f"イベント名: {info['title']}\nURL: {info['url']}\n候補日程:\n{dates_str}"
     except ChouseisanError as e:
         logger.error(f"Chouseisan error in get_event_info: {e}")
         return f"エラー: 情報の取得に失敗しました。詳細: {str(e)}"
     except Exception as e:
+        import traceback
         logger.exception("Unexpected error in get_event_info")
-        return f"エラー: 予期せぬエラーが発生しました。{str(e)}"
+        return f"エラー: 予期せぬエラーが発生しました。{str(e)}\n{traceback.format_exc()}"
 
 @mcp.tool()
-def add_response(url: str, name: str, comment: str = "", availability_json: str = "[]") -> str:
+async def add_response(url: str, name: str, comment: str = "", availability_json: str = "[]") -> str:
     """
     調整さんのイベントに出欠回答を登録します。
     
@@ -85,7 +91,7 @@ def add_response(url: str, name: str, comment: str = "", availability_json: str 
         except json.JSONDecodeError:
             return "エラー: availability_json の形式が正しくありません。"
 
-        success = client.add_response(url, name, comment, availability)
+        success = await client.add_response(url, name, comment, availability)
         if success:
             return f"{name} さんの出欠を登録しました。"
         else:
