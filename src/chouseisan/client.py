@@ -6,68 +6,82 @@ from typing import List, Dict, Any, Optional
 logger = logging.getLogger(__name__)
 
 class ChouseisanError(Exception):
+    """調整さんクライアントの基底例外クラス"""
     pass
 
 class NetworkError(ChouseisanError):
+    """ネットワーク通信エラー"""
     pass
 
 class ScrapingError(ChouseisanError):
+    """スクレイピングエラー"""
     pass
 
 class ChouseisanClient:
+    """調整さん (chouseisan.com) を操作するためのクライアントクラス"""
     BASE_URL = "https://chouseisan.com"
 
     def __init__(self):
         pass
 
     async def create_event(self, title: str, memo: str = "", dates: str = "") -> str:
+        """
+        新しいイベントを作成します。
+
+        Args:
+            title (str): イベントのタイトル
+            memo (str, optional): イベントのメモ（説明文）. Defaults to "".
+            dates (str, optional): 候補日程（改行区切り）. Defaults to "".
+
+        Returns:
+            str: 作成されたイベントのURL
+
+        Raises:
+            ChouseisanError: イベント作成に失敗した場合
+        """
         logger.info(f"Creating event: {title}")
-        print("DEBUG: entering create_event")
+        logger.debug("Entering create_event")
         async with async_playwright() as p:
-            print("DEBUG: launched playwright")
+            logger.debug("Launched playwright")
             browser = await p.chromium.launch(headless=True)
-            print("DEBUG: launched browser")
+            logger.debug("Launched browser")
             page = await browser.new_page()
             try:
                 await page.goto(self.BASE_URL)
-                print("DEBUG: navigated to base url")
+                logger.debug("Navigated to base url")
                 
                 await page.fill('input[name="name"]', title)
                 await page.fill('textarea[name="comment"]', memo)
                 await page.fill('textarea[name="kouho"]', dates)
-                print("DEBUG: filled form")
+                logger.debug("Filled form")
                 
-                # Click create button
-                # Use specific selector
-                # Try multiple selectors effectively
+                # イベント作成ボタンをクリック
+                # 複数のセレクタ候補からボタンを探す
                 btn = (await page.locator('#createBtn, #create_event_submit_btn, button:has-text("出欠表をつくる")').all())[0]
-                if await btn.count() > 0 or True: # .all() returns elements, not locator with count in async? No, locator.all() returns list of locators.
-                    # Wait, let's use first variable
+                if await btn.count() > 0 or True: # .all() は要素のリストを返すが、ロジック上の分岐として残す
                     btn_locator = page.locator('#createBtn, #create_event_submit_btn, button:has-text("出欠表をつくる")').first
                     if await btn_locator.count() > 0:
-                        print(f"DEBUG: clicking button {await btn_locator.inner_text()}")
+                        btn_text = await btn_locator.inner_text()
+                        logger.debug(f"Clicking button: {btn_text}")
                         await btn_locator.click()
                     else:
                         raise ChouseisanError("Submit button not found")
                 
-                print("DEBUG: clicked submit")
+                logger.debug("Clicked submit")
                 
-                # Wait for confirmation page/URL
+                # 作成完了後のURL入力を待機
                 try:
-                    # New event URL input - wait explicitly
-                    # class="new-event-url-input"
-                    print("DEBUG: waiting for url input")
+                    logger.debug("Waiting for url input")
                     await page.wait_for_selector('input.new-event-url-input', timeout=10000)
                     url = await page.input_value('input.new-event-url-input')
-                    print(f"DEBUG: found url {url}")
+                    logger.debug(f"Found url {url}")
                 except Exception as e:
-                    print(f"DEBUG: wait failed {e}, trying fallback")
-                    # Fallback if redirection happens directly
-                    # Check if we are on a page that looks like event page
+                    logger.debug(f"Wait failed {e}, trying fallback")
+                    # 直接リダイレクトされた場合のフォールバック
                     if "s?h=" in page.url:
                          url = page.url
                     else:
-                         # try waiting for url change
+                         # URLの変化を待機
                          await page.wait_for_url("**/s?h=*", timeout=5000)
                          url = page.url
 
@@ -75,14 +89,28 @@ class ChouseisanClient:
                 return url
             except Exception as e:
                 logger.exception("Error creating event")
-                print(f"DEBUG: exception {e}")
                 raise ChouseisanError(f"Error creating event: {e}")
             finally:
-                print("DEBUG: closing browser")
+                logger.debug("Closing browser")
                 await browser.close()
 
 
     async def get_event_info(self, event_url: str) -> Dict[str, Any]:
+        """
+        イベント情報を取得します。
+
+        Args:
+            event_url (str): イベントのURL
+
+        Returns:
+            Dict[str, Any]: イベント情報を含む辞書
+                - title: イベントタイトル
+                - dates: 候補日程のリスト
+                - url: イベントURL
+
+        Raises:
+            ChouseisanError: イベント情報の取得に失敗した場合
+        """
         logger.info(f"Fetching event info from: {event_url}")
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
@@ -90,36 +118,30 @@ class ChouseisanClient:
             try:
                 await page.goto(event_url)
                 
-                # Title
-                print("DEBUG: getting title")
+                # タイトル取得
+                logger.debug("Getting title")
                 title = await page.locator('h1').inner_text()
-                print(f"DEBUG: title {title}")
+                logger.debug(f"Title: {title}")
                 
-                # Dates
+                # 日程取得
                 dates = []
                 
-                # Try #nittei table first (Vertical layout often used in Chouseisan)
-                # Selector found: #nittei tr td:first-child
-                # Often the first row is header "日程", so we might skip it?
-                # The subagent said "The very first element matched by this selector is the column header '日程'".
-                print("DEBUG: getting dates locator")
-                # Try #nittei table first
-                # Selector found: #nittei tr td:first-child
+                logger.debug("Getting dates locator")
+                # #nittei テーブルの最初のセル（日程列）を取得
                 nittei_locator = page.locator('#nittei tr td:first-child')
-                print("DEBUG: counting nittei")
                 nittei_count = await nittei_locator.count()
-                print(f"DEBUG: nittei count {nittei_count}")
+                logger.debug(f"Nittei count: {nittei_count}")
+                
                 if nittei_count > 0:
                     for i in range(nittei_count):
                         td = nittei_locator.nth(i)
                         text = await td.inner_text()
-                        if text.strip() == "日程": # Skip header
+                        if text.strip() == "日程": # ヘッダー行をスキップ
                             continue
                         dates.append(text)
                 
-                # If no dates found, try the old selector (header of attendance table)
+                # 日程が見つからない場合、古いセレクタ（出欠表のヘッダー）を試行
                 if not dates:
-                    # Try table headers
                     th_locator = page.locator('#attendance-table th.valign-middle')
                     th_count = await th_locator.count()
                     if th_count > 2:
@@ -140,6 +162,21 @@ class ChouseisanClient:
                 await browser.close()
 
     async def add_response(self, event_url: str, name: str, comment: str = "", availability: Optional[List[int]] = None) -> bool:
+        """
+        イベントに出欠回答を追加します。
+
+        Args:
+            event_url (str): イベントのURL
+            name (str): 回答者の名前
+            comment (str, optional): コメント. Defaults to "".
+            availability (Optional[List[int]], optional): 各日程に対する回答のリスト (2: ○, 1: △, 0: ×). Defaults to None.
+
+        Returns:
+            bool: 登録に成功した場合は True
+
+        Raises:
+            ChouseisanError: 出欠登録に失敗した場合
+        """
         if availability is None:
             availability = []
             
@@ -150,38 +187,32 @@ class ChouseisanClient:
             try:
                 await page.goto(event_url)
                 
-                # Click "出欠を入力する"
-                # Selector found in analysis: #add_btn
+                # "出欠を入力する" ボタンをクリック
                 await page.click('#add_btn')
                 
-                # Wait for form
-                # Check for name input "f_name" (id) or name="name"
+                # フォームが表示されるのを待機
                 await page.wait_for_selector('input[name="name"]', timeout=5000)
                 
-                # Fill name
+                # 名前を入力
                 await page.fill('input[name="name"]', name)
                 
-                # Fill comment (hitokoto)
-                # Selector from dump: input[name="hitokoto"]
+                # コメント (hitokoto) を入力
                 if await page.locator('input[name="hitokoto"]').count() > 0:
                     await page.fill('input[name="hitokoto"]', comment)
                 else:
                     logger.warning("Comment field 'hitokoto' not found, skipping.")
                 
-                # Fill availability by clicking buttons
-                # User Input Values: 2 (O), 1 (Tri), 0 (X)
-                # Button classes: .oax-0 (O), .oax-1 (Tri), .oax-2 (X)
+                # 出欠を入力 (2: ○, 1: △, 0: ×)
+                # ボタンクラス: .oax-0 (O), .oax-1 (Tri), .oax-2 (X)
                 button_class_map = {2: "oax-0", 1: "oax-1", 0: "oax-2"}
                 
-                # Click buttons for each date
                 for i, status in enumerate(availability):
                     field_name = f"kouho{i+1}"
-                    # Check if hidden input exists
+                    # check if hidden input exists
                     if await page.locator(f'input[name="{field_name}"]').count() > 0:
-                        button_class = button_class_map.get(status, "oax-2") # Default to X if unknown
-                        # Find the parent element of the hidden input
-                        # Then find the button with the appropriate class within that parent
-                        # Use JavaScript to click the button relative to the hidden input
+                        button_class = button_class_map.get(status, "oax-2") # 未知の値は×とする
+                        
+                        # 隠しフィールドに対応するボタンをクリック
                         await page.evaluate(f'''() => {{
                             const hiddenInput = document.querySelector('input[name="{field_name}"]');
                             if (hiddenInput) {{
@@ -192,16 +223,15 @@ class ChouseisanClient:
                                 }}
                             }}
                         }}''')
-                        # Small delay to ensure the click is processed
+                        # クリック処理のために少し待機
                         await page.wait_for_timeout(100)
                     else:
                         logger.warning(f"Availability field {field_name} not found.")
 
-                # Submit
-                # Button id="memUpdBtn" name="add"
+                # 保存ボタンをクリック
                 await page.click('#memUpdBtn')
                 
-                # Wait for completion
+                # 完了を待機
                 await page.wait_for_load_state("domcontentloaded")
                 
                 return True
