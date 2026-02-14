@@ -1,5 +1,6 @@
 from mcp.server.fastmcp import FastMCP
 import logging
+import json
 from chouseisan.client import ChouseisanClient, ChouseisanError
 
 # ロギングの設定
