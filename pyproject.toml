@@ -7,6 +7,7 @@ authors = [
 ]
 dependencies = [
     "mcp",
+    "playwright>=1.40.0",
     "requests",
     "beautifulsoup4",
     "lxml",
