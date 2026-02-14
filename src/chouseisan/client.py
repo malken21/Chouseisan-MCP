@@ -136,6 +136,14 @@ class ChouseisanClient:
                     except Exception as e:
                         logger.warning(f"Fallback JS parse failed: {e}")
 
+            # choices 配列からの抽出を試みる (最新のページ構造対応)
+            if not dates:
+                logger.debug("Attempting to extract dates from window.Chouseisan['choices'].")
+                m = re.findall(r'\"choice\"\s*:\s*\"(.*?)\"', res.text)
+                if m:
+                    dates = [d.replace('\\/', '/').strip() for d in m if d.strip()]
+                    logger.info(f"Dates extracted from choices: {dates}")
+
             return {
                 "title": title,
                 "dates": dates,
