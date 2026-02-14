@@ -13,18 +13,27 @@
 ```bash
 uv venv
 uv sync
+uv run playwright install chromium
 ```
 
 ## 使い方
 
-Claude Desktop などの MCP クライアントの設定に以下を追加してください
+Claude Desktop などの MCP クライアントの設定に以下を追加してください。
+
+`[リポジトリのパス]` は実際のリポジトリの絶対パスに置き換えてください。
 
 ```json
 {
   "mcpServers": {
     "chouseisan": {
-      "command": "python",
-      "args": ["[リポジトリのパス]/src/main.py"]
+      "command": "uv",
+      "args": [
+        "--directory",
+        "[リポジトリのパス]",
+        "run",
+        "python",
+        "src/main.py"
+      ]
     }
   }
 }
