@@ -4,9 +4,13 @@ import json
 from chouseisan.client import ChouseisanClient, ChouseisanError
 
 # ロギングの設定
+# タイムスタンプ、ロガー名、ログレベル、メッセージを含むフォーマットを設定
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler() # 標準出力に出力
+    ]
 )
 logger = logging.getLogger("mcp-chouseisan")
 
