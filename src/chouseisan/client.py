@@ -208,7 +208,7 @@ class ChouseisanClient:
                 
                 for i, status in enumerate(availability):
                     field_name = f"kouho{i+1}"
-                    # check if hidden input exists
+                    # 隠し入力が存在するかどうかを確認
                     if await page.locator(f'input[name="{field_name}"]').count() > 0:
                         button_class = button_class_map.get(status, "oax-2") # 未知の値は×とする
                         
