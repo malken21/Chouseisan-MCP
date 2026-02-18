@@ -65,5 +65,5 @@ uv run python src/main.py --transport sse --port 8000
 
 以下の環境変数を設定または `.env` ファイルに記述することで、動作をカスタマイズできます。
 
-- **`CHOUSEISAN_TRANSPORT`**: 通信モード (`stdio` または `sse`)。デフォルトは `stdio`。
-- **`CHOUSEISAN_PORT`**: 待機ポート番号 (SSE モード時のみ有効)。デフォルトは `8000`。
+- `TRANSPORT`: 通信モード (`stdio` または `sse`)。デフォルトは `stdio`。
+- `PORT`: 待機ポート番号 (SSE モード時のみ有効)。デフォルトは `8000`。
