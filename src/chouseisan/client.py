@@ -56,16 +56,11 @@ class ChouseisanClient:
                 logger.debug("Filled form")
                 
                 # イベント作成ボタンをクリック
-                # 複数のセレクタ候補からボタンを探す
-                btn = (await page.locator('#createBtn, #create_event_submit_btn, button:has-text("出欠表をつくる")').all())[0]
-                if await btn.count() > 0 or True: # .all() は要素のリストを返すが、ロジック上の分岐として残す
-                    btn_locator = page.locator('#createBtn, #create_event_submit_btn, button:has-text("出欠表をつくる")').first
-                    if await btn_locator.count() > 0:
-                        btn_text = await btn_locator.inner_text()
-                        logger.debug(f"Clicking button: {btn_text}")
-                        await btn_locator.click()
-                    else:
-                        raise ChouseisanError("Submit button not found")
+                btn_locator = page.locator('#createBtn, #create_event_submit_btn, button:has-text("出欠表をつくる")').first
+                if await btn_locator.count() > 0:
+                    await btn_locator.click()
+                else:
+                    raise ChouseisanError("Submit button not found")
                 
                 logger.debug("Clicked submit")
                 
@@ -212,7 +207,7 @@ class ChouseisanClient:
                     if await page.locator(f'input[name="{field_name}"]').count() > 0:
                         button_class = button_class_map.get(status, "oax-2") # 未知の値は×とする
                         
-                        # 隠しフィールドに対応するボタンをクリック
+                        # hidden フィールドに対応するボタンをクリック
                         await page.evaluate(f'''() => {{
                             const hiddenInput = document.querySelector('input[name="{field_name}"]');
                             if (hiddenInput) {{
