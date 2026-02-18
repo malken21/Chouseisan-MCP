@@ -8,6 +8,8 @@ authors = [
 dependencies = [
     "mcp",
     "playwright>=1.40.0",
+    "uvicorn",
+    "python-dotenv",
 ]
 requires-python = ">=3.10"
 
