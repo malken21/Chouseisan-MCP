@@ -111,8 +111,8 @@ if __name__ == "__main__":
     load_dotenv()
 
     parser = argparse.ArgumentParser(description="調整さん MCP サーバー")
-    parser.add_argument("--port", type=int, default=int(os.environ.get("CHOUSEISAN_PORT", 8000)), help="待機ポート番号 (SSE 転送モード時のみ有効)")
-    parser.add_argument("--transport", type=str, default=os.environ.get("CHOUSEISAN_TRANSPORT", "stdio"), choices=["stdio", "sse"], help="通信モード (stdio または sse)")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)), help="待機ポート番号 (SSE 転送モード時のみ有効)")
+    parser.add_argument("--transport", type=str, default=os.environ.get("TRANSPORT", "stdio"), choices=["stdio", "sse"], help="通信モード (stdio または sse)")
     args = parser.parse_args()
 
     if args.transport == "sse":
