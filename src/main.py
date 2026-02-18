@@ -1,6 +1,10 @@
 from mcp.server.fastmcp import FastMCP
 import logging
 import json
+import argparse
+import os
+import uvicorn
+from dotenv import load_dotenv
 from chouseisan.client import ChouseisanClient, ChouseisanError
 
 # ロギングの設定
@@ -62,9 +66,8 @@ async def get_event_info(url: str) -> str:
         logger.error(f"Chouseisan error in get_event_info: {e}")
         return f"エラー: 情報の取得に失敗しました。詳細: {str(e)}"
     except Exception as e:
-        import traceback
         logger.exception("Unexpected error in get_event_info")
-        return f"エラー: 予期せぬエラーが発生しました。{str(e)}\n{traceback.format_exc()}"
+        return f"エラー: 予期せぬエラーが発生しました。{str(e)}"
 
 @mcp.tool()
 async def add_response(url: str, name: str, comment: str = "", availability_json: str = "[]") -> str:
@@ -104,4 +107,18 @@ async def add_response(url: str, name: str, comment: str = "", availability_json
         return f"エラー: 予期せぬ例外が発生しました。{str(e)}"
 
 if __name__ == "__main__":
-    mcp.run()
+    # .envファイルの読み込み
+    load_dotenv()
+
+    parser = argparse.ArgumentParser(description="調整さん MCP サーバー")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)), help="待機ポート番号 (SSE 転送モード時のみ有効)")
+    parser.add_argument("--transport", type=str, default=os.environ.get("TRANSPORT", "stdio"), choices=["stdio", "sse"], help="通信モード (stdio または sse)")
+    args = parser.parse_args()
+
+    if args.transport == "sse":
+        # SSEの場合はuvicornを使用して起動
+        logger.info(f"Starting SSE server on port {args.port}")
+        uvicorn.run(mcp.sse_app, host="0.0.0.0", port=args.port)
+    else:
+        # デフォルトは標準入出力 (stdio)
+        mcp.run(transport="stdio")
