@@ -127,17 +127,21 @@ wheels = [
 
 [[package]]
 name = "chouseisan-mcp"
-version = "1.1.0"
+version = "1.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
     { name = "playwright" },
+    { name = "python-dotenv" },
+    { name = "uvicorn" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "mcp" },
     { name = "playwright", specifier = ">=1.40.0" },
+    { name = "python-dotenv" },
+    { name = "uvicorn" },
 ]
 
 [[package]]
