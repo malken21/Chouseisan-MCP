@@ -1,7 +1,10 @@
-
-from playwright.async_api import async_playwright
 import logging
-from typing import List, Dict, Any, Optional
+import json
+import os
+from typing import List, Dict, Any, Optional, Union, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page, Browser
 
 logger = logging.getLogger(__name__)
 
@@ -17,21 +20,95 @@ class ScrapingError(ChouseisanError):
     """スクレイピングエラー"""
     pass
 
+def parse_availability_status(val: Any) -> int:
+    """
+    多様な出欠入力値を内部数値 (2: ○, 1: △, 0: ×) に変換します。
+    
+    Args:
+        val: 数値 (0,1,2) や記号 (○, △, ×), 文字列 ("2", "1", "0", "OK", "NG", "MAYBE" など)
+    
+    Returns:
+        int: 2 (○), 1 (△), 0 (×)
+    """
+    if isinstance(val, int):
+        if val in (0, 1, 2):
+            return val
+        return 0
+
+    s = str(val).strip().lower()
+    if s in ("2", "○", "o", "ok", "maru", "yes", "true", "出席", "参加"):
+        return 2
+    if s in ("1", "△", "tri", "triangle", "maybe", "sankaku", "未定", "どちらでも"):
+        return 1
+    if s in ("0", "×", "x", "ng", "batsu", "no", "false", "欠席", "不参加"):
+        return 0
+    
+    try:
+        n = int(s)
+        if n in (0, 1, 2):
+            return n
+    except ValueError:
+        pass
+    
+    return 0
+
+def parse_availability_list(input_val: Union[List[Any], str, None]) -> List[int]:
+    """
+    文字列、JSON文字列、またはリストを出欠数値のリスト [2, 1, 0, ...] に変換します。
+    
+    Args:
+        input_val: リスト、JSON文字列 (" [2, 1, 0] "), またはカンマ・スペース区切り文字列
+        
+    Returns:
+        List[int]: 各日程に対する出欠数値リスト
+    """
+    if input_val is None:
+        return []
+    
+    if isinstance(input_val, str):
+        s = input_val.strip()
+        if not s:
+            return []
+        # JSON形式のリスト解釈
+        if s.startswith("[") and s.endswith("]"):
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, list):
+                    return [parse_availability_status(x) for x in parsed]
+            except json.JSONDecodeError:
+                pass
+        # カンマ区切りまたは空白区切り文字列解釈
+        delimiter = "," if "," in s else " "
+        parts = [p.strip() for p in s.split(delimiter) if p.strip()]
+        if parts:
+            return [parse_availability_status(p) for p in parts]
+        return []
+
+    if isinstance(input_val, (list, tuple)):
+        return [parse_availability_status(x) for x in input_val]
+
+    return []
+
 class ChouseisanClient:
-    """調整さん (chouseisan.com) を操作するためのクライアントクラス"""
+    """調整さん (chouseisan.com) を操作するための高信頼クライアントクラス"""
     BASE_URL = "https://chouseisan.com"
 
-    def __init__(self):
-        pass
+    def __init__(self, headless: Optional[bool] = None, timeout: int = 15000):
+        if headless is None:
+            headless_env = os.environ.get("HEADLESS", "true").lower()
+            self.headless = headless_env in ("true", "1", "yes")
+        else:
+            self.headless = headless
+        self.timeout = timeout
 
     async def create_event(self, title: str, memo: str = "", dates: str = "") -> str:
         """
-        新しいイベントを作成します。
+        新しい調整さんイベントを作成します。
 
         Args:
             title (str): イベントのタイトル
-            memo (str, optional): イベントのメモ（説明文）. Defaults to "".
-            dates (str, optional): 候補日程（改行区切り）. Defaults to "".
+            memo (str, optional): イベントのメモ（説明文）
+            dates (str, optional): 候補日程（改行区切り）
 
         Returns:
             str: 作成されたイベントのURL
@@ -39,60 +116,58 @@ class ChouseisanClient:
         Raises:
             ChouseisanError: イベント作成に失敗した場合
         """
-        logger.info(f"Creating event: {title}")
-        logger.debug("Entering create_event")
+        if not title or not title.strip():
+            raise ChouseisanError("イベントタイトルは必須です。")
+
+        logger.info(f"Creating Chouseisan event: '{title}'")
+        from playwright.async_api import async_playwright
         async with async_playwright() as p:
-            logger.debug("Launched playwright")
-            browser = await p.chromium.launch(headless=True)
-            logger.debug("Launched browser")
-            page = await browser.new_page()
+            browser = await p.chromium.launch(headless=self.headless)
             try:
-                await page.goto(self.BASE_URL)
-                logger.debug("Navigated to base url")
+                page = await browser.new_page()
+                page.set_default_timeout(self.timeout)
+                
+                await page.goto(self.BASE_URL, wait_until="domcontentloaded")
                 
                 await page.fill('input[name="name"]', title)
                 await page.fill('textarea[name="comment"]', memo)
                 await page.fill('textarea[name="kouho"]', dates)
-                logger.debug("Filled form")
                 
-                # イベント作成ボタンをクリック
+                # 送信ボタンクリック
                 btn_locator = page.locator('#createBtn, #create_event_submit_btn, button:has-text("出欠表をつくる")').first
                 if await btn_locator.count() > 0:
                     await btn_locator.click()
                 else:
-                    raise ChouseisanError("Submit button not found")
+                    raise ScrapingError("イベント作成ボタンが見つかりませんでした。")
                 
-                logger.debug("Clicked submit")
-                
-                # 作成完了後のURL入力を待機
+                # 作成完了後のURL取得
                 try:
-                    logger.debug("Waiting for url input")
-                    await page.wait_for_selector('input.new-event-url-input', timeout=10000)
+                    await page.wait_for_selector('input.new-event-url-input', timeout=self.timeout)
                     url = await page.input_value('input.new-event-url-input')
-                    logger.debug(f"Found url {url}")
-                except Exception as e:
-                    logger.debug(f"Wait failed {e}, trying fallback")
-                    # 直接リダイレクトされた場合のフォールバック
+                except Exception:
+                    # リダイレクト後のURLフォールバック
                     if "s?h=" in page.url:
-                         url = page.url
+                        url = page.url
                     else:
-                         # URLの変化を待機
-                         await page.wait_for_url("**/s?h=*", timeout=5000)
-                         url = page.url
+                        await page.wait_for_url("**/s?h=*", timeout=5000)
+                        url = page.url
+
+                if not url or "chouseisan.com" not in url:
+                    raise ScrapingError(f"無効なイベントURLが生成されました: {url}")
 
                 logger.info(f"Event created successfully: {url}")
                 return url
             except Exception as e:
-                logger.exception("Error creating event")
-                raise ChouseisanError(f"Error creating event: {e}")
+                logger.exception("Failed to create event")
+                if isinstance(e, ChouseisanError):
+                    raise
+                raise ChouseisanError(f"イベントの作成に失敗しました: {e}") from e
             finally:
-                logger.debug("Closing browser")
                 await browser.close()
-
 
     async def get_event_info(self, event_url: str) -> Dict[str, Any]:
         """
-        イベント情報を取得します。
+        イベント情報（タイトル、候補日程一覧、URL）を取得します。
 
         Args:
             event_url (str): イベントのURL
@@ -106,65 +181,77 @@ class ChouseisanClient:
         Raises:
             ChouseisanError: イベント情報の取得に失敗した場合
         """
-        logger.info(f"Fetching event info from: {event_url}")
+        if not event_url or not event_url.startswith("http"):
+            raise ChouseisanError(f"無効なURLフォーマットです: {event_url}")
+
+        logger.info(f"Fetching event info: {event_url}")
+        from playwright.async_api import async_playwright
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+            browser = await p.chromium.launch(headless=self.headless)
             try:
-                await page.goto(event_url)
+                page = await browser.new_page()
+                page.set_default_timeout(self.timeout)
+                await page.goto(event_url, wait_until="domcontentloaded")
                 
                 # タイトル取得
-                logger.debug("Getting title")
-                title = await page.locator('h1').inner_text()
-                logger.debug(f"Title: {title}")
+                title = ""
+                if await page.locator('h1').count() > 0:
+                    title = (await page.locator('h1').inner_text()).strip()
+                elif await page.locator('.event-name').count() > 0:
+                    title = (await page.locator('.event-name').inner_text()).strip()
                 
-                # 日程取得
-                dates = []
-                
-                logger.debug("Getting dates locator")
-                # #nittei テーブルの最初のセル（日程列）を取得
+                # 日程リスト取得
+                dates: List[str] = []
                 nittei_locator = page.locator('#nittei tr td:first-child')
                 nittei_count = await nittei_locator.count()
-                logger.debug(f"Nittei count: {nittei_count}")
                 
                 if nittei_count > 0:
                     for i in range(nittei_count):
-                        td = nittei_locator.nth(i)
-                        text = await td.inner_text()
-                        if text.strip() == "日程": # ヘッダー行をスキップ
-                            continue
-                        dates.append(text)
-                
-                # 日程が見つからない場合、古いセレクタ（出欠表のヘッダー）を試行
+                        td_text = (await nittei_locator.nth(i).inner_text()).strip()
+                        if td_text and td_text != "日程":
+                            dates.append(td_text)
+
                 if not dates:
+                    # フォールバックセレクタ
                     th_locator = page.locator('#attendance-table th.valign-middle')
                     th_count = await th_locator.count()
                     if th_count > 2:
                         for i in range(2, th_count):
-                             th = th_locator.nth(i)
-                             dates.append(await th.inner_text())
+                            text = (await th_locator.nth(i).inner_text()).strip()
+                            if text:
+                                dates.append(text)
                 
-                logger.info(f"Found {len(dates)} dates")
+                logger.info(f"Retrieved event '{title}' with {len(dates)} candidate dates.")
                 return {
                     "title": title,
                     "dates": dates,
                     "url": event_url
                 }
             except Exception as e:
-                logger.exception("Error getting event info")
-                raise ChouseisanError(f"Error getting event info: {e}")
+                logger.exception(f"Failed to fetch event info for {event_url}")
+                if isinstance(e, ChouseisanError):
+                    raise
+                raise ChouseisanError(f"イベント情報の取得に失敗しました: {e}") from e
             finally:
                 await browser.close()
 
-    async def add_response(self, event_url: str, name: str, comment: str = "", availability: Optional[List[int]] = None) -> bool:
+    async def add_response(
+        self,
+        event_url: str,
+        name: str,
+        comment: str = "",
+        availability: Optional[Union[List[Any], str]] = None
+    ) -> bool:
         """
-        イベントに出欠回答を追加します。
+        イベントに出欠回答を追加・更新します。
 
         Args:
             event_url (str): イベントのURL
             name (str): 回答者の名前
-            comment (str, optional): コメント. Defaults to "".
-            availability (Optional[List[int]], optional): 各日程に対する回答のリスト (2: ○, 1: △, 0: ×). Defaults to None.
+            comment (str, optional): コメント（ひとこと）
+            availability (Optional[Union[List[Any], str]], optional):
+                各日程の出欠回答。
+                リスト ([2, 1, 0] や ["○", "△", "×"]), または JSON文字列/カンマ区切り文字列
 
         Returns:
             bool: 登録に成功した場合は True
@@ -172,66 +259,69 @@ class ChouseisanClient:
         Raises:
             ChouseisanError: 出欠登録に失敗した場合
         """
-        if availability is None:
-            availability = []
-            
-        logger.info(f"Adding response for {name} to: {event_url}")
+        if not event_url or not event_url.startswith("http"):
+            raise ChouseisanError(f"無効なURLフォーマットです: {event_url}")
+        if not name or not name.strip():
+            raise ChouseisanError("回答者名は必須です。")
+
+        avail_list = parse_availability_list(availability)
+        logger.info(f"Adding response for '{name}' to {event_url} (availability: {avail_list})")
+
+        from playwright.async_api import async_playwright
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+            browser = await p.chromium.launch(headless=self.headless)
             try:
-                await page.goto(event_url)
+                page = await browser.new_page()
+                page.set_default_timeout(self.timeout)
+                await page.goto(event_url, wait_until="domcontentloaded")
                 
                 # "出欠を入力する" ボタンをクリック
-                await page.click('#add_btn')
+                add_btn = page.locator('#add_btn, button:has-text("出欠を入力する")').first
+                if await add_btn.count() > 0:
+                    await add_btn.click()
+                else:
+                    raise ScrapingError("出欠入力ボタンが見つかりませんでした。")
                 
-                # フォームが表示されるのを待機
-                await page.wait_for_selector('input[name="name"]', timeout=5000)
+                # フォーム待機
+                await page.wait_for_selector('input[name="name"]', timeout=self.timeout)
                 
-                # 名前を入力
+                # 名前およびコメント入力
                 await page.fill('input[name="name"]', name)
                 
-                # コメント (hitokoto) を入力
                 if await page.locator('input[name="hitokoto"]').count() > 0:
                     await page.fill('input[name="hitokoto"]', comment)
-                else:
-                    logger.warning("Comment field 'hitokoto' not found, skipping.")
-                
-                # 出欠を入力 (2: ○, 1: △, 0: ×)
-                # ボタンクラス: .oax-0 (O), .oax-1 (Tri), .oax-2 (X)
+
+                # 出欠の入力 (2: ○, 1: △, 0: ×)
+                # ボタンクラス対応: 2 -> .oax-0, 1 -> .oax-1, 0 -> .oax-2
                 button_class_map = {2: "oax-0", 1: "oax-1", 0: "oax-2"}
                 
-                for i, status in enumerate(availability):
+                for i, status in enumerate(avail_list):
                     field_name = f"kouho{i+1}"
-                    # 隠し入力が存在するかどうかを確認
                     if await page.locator(f'input[name="{field_name}"]').count() > 0:
-                        button_class = button_class_map.get(status, "oax-2") # 未知の値は×とする
-                        
-                        # hidden フィールドに対応するボタンをクリック
+                        btn_class = button_class_map.get(status, "oax-2")
                         await page.evaluate(f'''() => {{
-                            const hiddenInput = document.querySelector('input[name="{field_name}"]');
-                            if (hiddenInput) {{
-                                const parent = hiddenInput.parentElement;
-                                const button = parent.querySelector('.{button_class}');
-                                if (button) {{
-                                    button.click();
-                                }}
+                            const input = document.querySelector('input[name="{field_name}"]');
+                            if (input && input.parentElement) {{
+                                const btn = input.parentElement.querySelector('.{btn_class}');
+                                if (btn) btn.click();
                             }}
                         }}''')
-                        # クリック処理のために少し待機
-                        await page.wait_for_timeout(100)
-                    else:
-                        logger.warning(f"Availability field {field_name} not found.")
+                        await page.wait_for_timeout(50)
 
                 # 保存ボタンをクリック
-                await page.click('#memUpdBtn')
+                save_btn = page.locator('#memUpdBtn, input[value="入力する"], button:has-text("入力する")').first
+                if await save_btn.count() > 0:
+                    await save_btn.click()
+                else:
+                    raise ScrapingError("保存ボタンが見つかりませんでした。")
                 
-                # 完了を待機
                 await page.wait_for_load_state("domcontentloaded")
-                
+                logger.info(f"Successfully registered availability for '{name}'")
                 return True
             except Exception as e:
-                logger.exception("Error adding response")
-                raise ChouseisanError(f"Error adding response: {e}")
+                logger.exception("Failed to add response")
+                if isinstance(e, ChouseisanError):
+                    raise
+                raise ChouseisanError(f"出欠の登録に失敗しました: {e}") from e
             finally:
                 await browser.close()
