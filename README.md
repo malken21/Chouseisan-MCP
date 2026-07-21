@@ -69,3 +69,4 @@ uv run python src/main.py --transport sse --port 8000
 - `HOST`: バインドIPアドレス (SSE モード時のみ有効)。デフォルトは `0.0.0.0`
 - `HEADLESS`: ヘッドレスブラウザ動作 (`true` / `false`)。デフォルトは `true`
 - `LOG_LEVEL`: ログレベル (`DEBUG`, `INFO`, `WARN`, `ERROR`)。デフォルトは `INFO`
+- `MCP_DISABLE_DNS_REBINDING_PROTECTION`: DNS Rebinding Protection を無効化 (`1` で無効化)。コンテナ環境等、Host ヘッダーが `127.0.0.1`/`localhost` 以外になる構成で SSE モードを利用する場合に設定してください。デフォルトは無効化しない

@@ -26,9 +26,24 @@ logging.basicConfig(
 logger = logging.getLogger("chouseisan-mcp")
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
+
+# DNS Rebinding Protection の制御
+# コンテナ環境等、Host ヘッダーが 127.0.0.1/localhost 以外になる構成で SSE 転送を
+# 利用する場合、MCP_DISABLE_DNS_REBINDING_PROTECTION=1 を設定することで無効化できます。
+_disable_dns_rebinding_protection = os.environ.get("MCP_DISABLE_DNS_REBINDING_PROTECTION") == "1"
+_transport_security = (
+    TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    if _disable_dns_rebinding_protection
+    else None
+)
 
 # FastMCP インスタンスの作成
-mcp = FastMCP("Chouseisan", description="調整さん (chouseisan.com) のイベント作成・管理・出欠登録を行う MCP サーバー")
+mcp = FastMCP(
+    "Chouseisan",
+    instructions="調整さん (chouseisan.com) のイベント作成・管理・出欠登録を行う MCP サーバー",
+    transport_security=_transport_security,
+)
 client = ChouseisanClient()
 
 @mcp.tool()
