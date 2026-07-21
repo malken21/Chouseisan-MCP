@@ -13,7 +13,6 @@
 ## インストール
 
 ```bash
-uv venv
 uv sync
 uv run playwright install chromium
 ```
@@ -67,3 +66,6 @@ uv run python src/main.py --transport sse --port 8000
 
 - `TRANSPORT`: 通信モード (`stdio` または `sse`)。デフォルトは `stdio`
 - `PORT`: 待機ポート番号 (SSE モード時のみ有効)。デフォルトは `8000`
+- `HOST`: バインドIPアドレス (SSE モード時のみ有効)。デフォルトは `0.0.0.0`
+- `HEADLESS`: ヘッドレスブラウザ動作 (`true` / `false`)。デフォルトは `true`
+- `LOG_LEVEL`: ログレベル (`DEBUG`, `INFO`, `WARN`, `ERROR`)。デフォルトは `INFO`
