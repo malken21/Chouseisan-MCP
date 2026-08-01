@@ -143,15 +143,20 @@ async def add_response(
 if __name__ == "__main__":
     default_host = os.environ.get("HOST", "0.0.0.0")
     default_port = int(os.environ.get("PORT", "8000"))
-    default_transport = os.environ.get("TRANSPORT", "stdio").lower()
+    default_transport = (
+        os.environ.get("MCP_TRANSPORT") or os.environ.get("TRANSPORT") or "stdio"
+    ).lower()
 
     parser = argparse.ArgumentParser(description="調整さん MCP サーバー")
-    parser.add_argument("--host", type=str, default=default_host, help="バインドIPアドレス (SSE 転送モード時)")
-    parser.add_argument("--port", type=int, default=default_port, help="待機ポート番号 (SSE 転送モード時)")
-    parser.add_argument("--transport", type=str, default=default_transport, choices=["stdio", "sse"], help="通信モード (stdio または sse)")
+    parser.add_argument("--host", type=str, default=default_host, help="バインドIPアドレス (HTTP / SSE 転送モード時)")
+    parser.add_argument("--port", type=int, default=default_port, help="待機ポート番号 (HTTP / SSE 転送モード時)")
+    parser.add_argument("--transport", type=str, default=default_transport, choices=["stdio", "sse", "http", "mcp"], help="通信モード (stdio, sse, http, または mcp)")
     args = parser.parse_args()
 
-    if args.transport == "sse":
+    if args.transport in ["http", "mcp"]:
+        logger.info(f"Starting Chouseisan MCP Streamable HTTP Server on {args.host}:{args.port}")
+        uvicorn.run(mcp.streamable_http_app(), host=args.host, port=args.port)
+    elif args.transport == "sse":
         logger.info(f"Starting Chouseisan MCP SSE Server on {args.host}:{args.port}")
         uvicorn.run(mcp.sse_app, host=args.host, port=args.port)
     else:
