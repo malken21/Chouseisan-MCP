@@ -25,11 +25,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("chouseisan-mcp")
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
 # DNS Rebinding Protection の制御
-# コンテナ環境等、Host ヘッダーが 127.0.0.1/localhost 以外になる構成で SSE 転送を
+# コンテナ環境等、Host ヘッダーが 127.0.0.1/localhost 以外になる構成で Streamable HTTP 転送を
 # 利用する場合、MCP_DISABLE_DNS_REBINDING_PROTECTION=1 を設定することで無効化できます。
 _disable_dns_rebinding_protection = os.environ.get("MCP_DISABLE_DNS_REBINDING_PROTECTION") == "1"
 _transport_security = (
@@ -38,11 +38,9 @@ _transport_security = (
     else None
 )
 
-# FastMCP インスタンスの作成
-mcp = FastMCP(
+mcp = MCPServer(
     "Chouseisan",
     instructions="調整さん (chouseisan.com) のイベント作成・管理・出欠登録を行う MCP サーバー",
-    transport_security=_transport_security,
 )
 client = ChouseisanClient()
 
@@ -83,7 +81,7 @@ async def get_event_info(url: str) -> str:
     """
     logger.info(f"Tool get_event_info invoked for url='{url}'")
     try:
-        info = await client.get_event_info(url=url)
+        info = await client.get_event_info(event_url=url)
         dates_list = info.get("dates", [])
         if dates_list:
             dates_str = "\n".join(f"  - {d}" for d in dates_list)
@@ -148,17 +146,15 @@ if __name__ == "__main__":
     ).lower()
 
     parser = argparse.ArgumentParser(description="調整さん MCP サーバー")
-    parser.add_argument("--host", type=str, default=default_host, help="バインドIPアドレス (HTTP / SSE 転送モード時)")
-    parser.add_argument("--port", type=int, default=default_port, help="待機ポート番号 (HTTP / SSE 転送モード時)")
-    parser.add_argument("--transport", type=str, default=default_transport, choices=["stdio", "sse", "http", "mcp"], help="通信モード (stdio, sse, http, または mcp)")
+    parser.add_argument("--host", type=str, default=default_host, help="バインドIPアドレス (HTTP 転送モード時)")
+    parser.add_argument("--port", type=int, default=default_port, help="待機ポート番号 (HTTP 転送モード時)")
+    parser.add_argument("--transport", type=str, default=default_transport, choices=["stdio", "http", "mcp"], help="通信モード (stdio, http, または mcp)")
     args = parser.parse_args()
 
     if args.transport in ["http", "mcp"]:
         logger.info(f"Starting Chouseisan MCP Streamable HTTP Server on {args.host}:{args.port}")
-        uvicorn.run(mcp.streamable_http_app(), host=args.host, port=args.port)
-    elif args.transport == "sse":
-        logger.info(f"Starting Chouseisan MCP SSE Server on {args.host}:{args.port}")
-        uvicorn.run(mcp.sse_app, host=args.host, port=args.port)
+        app = mcp.streamable_http_app(transport_security=_transport_security, host=args.host)
+        uvicorn.run(app, host=args.host, port=args.port)
     else:
         logger.info("Starting Chouseisan MCP Server in STDIO mode")
         mcp.run(transport="stdio")

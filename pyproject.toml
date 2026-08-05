@@ -6,7 +6,7 @@ authors = [
     { name = "Marumasa" }
 ]
 dependencies = [
-    "mcp",
+    "mcp>=2.0.0,<3",
     "playwright>=1.40.0",
     "uvicorn",
     "python-dotenv",
