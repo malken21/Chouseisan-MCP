@@ -1,16 +1,24 @@
 from __future__ import annotations
 
-import logging
-import json
 import argparse
+import functools
+import logging
 import os
-from typing import List, Union, Any, Optional
+from typing import Any, Callable, Coroutine
+
 import uvicorn
 from dotenv import load_dotenv
 
-from chouseisan.client import ChouseisanClient, ChouseisanError, parse_availability_list
+from mcp.server.mcpserver import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 
-# 環境変数・ロギングの初期設定
+from chouseisan.client import (
+    ChouseisanClient,
+    ChouseisanError,
+    parse_availability_list,
+)
+
+# 環境変数の読み込みおよびロガー初期化
 load_dotenv()
 
 log_level_str = os.environ.get("LOG_LEVEL", "INFO").upper()
@@ -18,19 +26,12 @@ log_level = getattr(logging, log_level_str, logging.INFO)
 
 logging.basicConfig(
     level=log_level,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler()
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger("chouseisan-mcp")
 
-from mcp.server.mcpserver import MCPServer
-from mcp.server.transport_security import TransportSecuritySettings
-
-# DNS Rebinding Protection の制御
-# コンテナ環境等、Host ヘッダーが 127.0.0.1/localhost 以外になる構成で Streamable HTTP 転送を
-# 利用する場合、MCP_DISABLE_DNS_REBINDING_PROTECTION=1 を設定することで無効化できます。
+# DNS Rebinding Protection 設定
 _disable_dns_rebinding_protection = os.environ.get("MCP_DISABLE_DNS_REBINDING_PROTECTION") == "1"
 _transport_security = (
     TransportSecuritySettings(enable_dns_rebinding_protection=False)
@@ -44,8 +45,37 @@ mcp = MCPServer(
 )
 client = ChouseisanClient()
 
+
+def handle_tool_errors(
+    error_prefix: str,
+) -> Callable[..., Callable[..., Coroutine[Any, Any, dict[str, Any]]]]:
+    """MCPツールの例外ハンドリングおよびレスポンス生成を一元化するデコレータ"""
+    def decorator(
+        func: Callable[..., Coroutine[Any, Any, dict[str, Any]]]
+    ) -> Callable[..., Coroutine[Any, Any, dict[str, Any]]]:
+        @functools.wraps(func)
+        async def wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            try:
+                return await func(*args, **kwargs)
+            except ChouseisanError as e:
+                logger.error(f"Chouseisan client error in {func.__name__}: {e}")
+                return {
+                    "success": False,
+                    "error": f"{error_prefix}: {str(e)}",
+                }
+            except Exception as e:
+                logger.exception(f"Unexpected error in {func.__name__}")
+                return {
+                    "success": False,
+                    "error": f"予期せぬエラーが発生しました: {str(e)}",
+                }
+        return wrapper
+    return decorator
+
+
 @mcp.tool()
-async def create_event(title: str, memo: str = "", dates: str = "") -> str:
+@handle_tool_errors("イベントの作成に失敗しました")
+async def create_event(title: str, memo: str = "", dates: str = "") -> dict[str, Any]:
     """
     調整さんの日程調整イベントを新規作成します。
 
@@ -55,54 +85,50 @@ async def create_event(title: str, memo: str = "", dates: str = "") -> str:
         dates: 候補日程 (改行区切りで指定。例: "3/1(土) 19:00-\n3/2(日) 15:00-\n3/3(月) 20:00-")
 
     Returns:
-        作成された調整さんイベントのURLおよび完了メッセージ
+        dict[str, Any]: 作成結果 (success: bool, url: str, message: str)
     """
     logger.info(f"Tool create_event invoked for title='{title}'")
-    try:
-        url = await client.create_event(title=title, memo=memo, dates=dates)
-        return f"イベントを作成しました。\nURL: {url}"
-    except ChouseisanError as e:
-        logger.error(f"Chouseisan client error in create_event: {e}")
-        return f"エラー: イベントの作成に失敗しました。詳細: {str(e)}"
-    except Exception as e:
-        logger.exception("Unexpected error in create_event")
-        return f"エラー: 予期せぬエラーが発生しました。詳細: {str(e)}"
+    url = await client.create_event(title=title, memo=memo, dates=dates)
+    return {
+        "success": True,
+        "url": url,
+        "message": "イベントを作成しました。",
+    }
+
 
 @mcp.tool()
-async def get_event_info(url: str) -> str:
+@handle_tool_errors("情報の取得に失敗しました")
+async def get_event_info(url: str) -> dict[str, Any]:
     """
-    調整さんイベントの登録情報（イベント名、候補日程一覧）を取得します。
+    調整さんイベントの登録情報（イベント名、候補日程・集計、各回答者の出欠情報○△×・コメント）を取得します。
 
     Args:
         url: 取得対象の調整さんイベントURL (例: "https://chouseisan.com/s?h=...")
 
     Returns:
-        イベント名、URL、および候補日程一覧のフォーマットテキスト
+        dict[str, Any]: イベント情報
+            - success (bool): 取得成功フラグ
+            - title (str): イベントタイトル
+            - url (str): イベントURL
+            - dates (list[str]): 候補日程一覧
+            - summary (dict[str, dict[str, int]]): 日程別集計人数 {"日程": {"ok": 0, "tri": 0, "ng": 0}}
+            - participants (list[dict[str, Any]]): 各回答者の情報 [{"name": str, "comment": str, "availability": {"日程": "○"}}]
     """
     logger.info(f"Tool get_event_info invoked for url='{url}'")
-    try:
-        info = await client.get_event_info(event_url=url)
-        dates_list = info.get("dates", [])
-        if dates_list:
-            dates_str = "\n".join(f"  - {d}" for d in dates_list)
-        else:
-            dates_str = "  (候補日程が見つかりませんでした)"
+    info = await client.fetch_event_info(event_url=url)
+    result = info.to_dict()
+    result["success"] = True
+    return result
 
-        return f"■ イベント名: {info['title']}\n■ URL: {info['url']}\n■ 候補日程:\n{dates_str}"
-    except ChouseisanError as e:
-        logger.error(f"Chouseisan client error in get_event_info: {e}")
-        return f"エラー: 情報の取得に失敗しました。詳細: {str(e)}"
-    except Exception as e:
-        logger.exception("Unexpected error in get_event_info")
-        return f"エラー: 予期せぬエラーが発生しました。詳細: {str(e)}"
 
 @mcp.tool()
+@handle_tool_errors("出欠の登録に失敗しました")
 async def add_response(
     url: str,
     name: str,
     comment: str = "",
-    availability: Union[List[Union[int, str]], str] = []
-) -> str:
+    availability: list[int | str] | str = "",
+) -> dict[str, Any]:
     """
     調整さんイベントに出欠回答を登録・更新します。
 
@@ -116,29 +142,29 @@ async def add_response(
                       例: ["○", "△", "×"] または [2, 1, 0]
 
     Returns:
-        出欠登録の結果メッセージ
+        dict[str, Any]: 出欠登録結果 (success: bool, message: str)
     """
     logger.info(f"Tool add_response invoked for name='{name}', url='{url}'")
-    try:
-        parsed_avail = parse_availability_list(availability)
-        success = await client.add_response(
-            event_url=url,
-            name=name,
-            comment=comment,
-            availability=parsed_avail
-        )
-        if success:
-            return f"'{name}' さんの出欠回答を正常に登録しました。"
-        else:
-            return "エラー: 出欠の登録に失敗しました。"
-    except ChouseisanError as e:
-        logger.error(f"Chouseisan client error in add_response: {e}")
-        return f"エラー: 出欠の登録に失敗しました。詳細: {str(e)}"
-    except Exception as e:
-        logger.exception("Unexpected error in add_response")
-        return f"エラー: 予期せぬ例外が発生しました。詳細: {str(e)}"
+    parsed_avail = parse_availability_list(availability)
+    success = await client.add_response(
+        event_url=url,
+        name=name,
+        comment=comment,
+        availability=parsed_avail,
+    )
+    if success:
+        return {
+            "success": True,
+            "message": f"'{name}' さんの出欠回答を正常に登録しました。",
+        }
+    return {
+        "success": False,
+        "error": "出欠の登録に失敗しました。",
+    }
 
-if __name__ == "__main__":
+
+def main() -> None:
+    """CLI引数の解析およびMCPサーバー起動"""
     default_host = os.environ.get("HOST", "0.0.0.0")
     default_port = int(os.environ.get("PORT", "8000"))
     default_transport = (
@@ -148,7 +174,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="調整さん MCP サーバー")
     parser.add_argument("--host", type=str, default=default_host, help="バインドIPアドレス (HTTP 転送モード時)")
     parser.add_argument("--port", type=int, default=default_port, help="待機ポート番号 (HTTP 転送モード時)")
-    parser.add_argument("--transport", type=str, default=default_transport, choices=["stdio", "http", "mcp"], help="通信モード (stdio, http, または mcp)")
+    parser.add_argument(
+        "--transport",
+        type=str,
+        default=default_transport,
+        choices=["stdio", "http", "mcp"],
+        help="通信モード (stdio, http, または mcp)",
+    )
     args = parser.parse_args()
 
     if args.transport in ["http", "mcp"]:
@@ -158,3 +190,7 @@ if __name__ == "__main__":
     else:
         logger.info("Starting Chouseisan MCP Server in STDIO mode")
         mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()
